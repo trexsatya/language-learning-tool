@@ -18,3 +18,5 @@ src/flash/flex_sdk_*
 coverage
 npm-debug.log
 tmp
+__pycache__
+demo/content
