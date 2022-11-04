@@ -1,12 +1,16 @@
 import json
 from typing import List
-
+import smtplib, ssl
 import requests
-from flask import Flask, request, jsonify, make_response
+import threading
+from flask import Flask, request, jsonify, make_response, Response
 import datetime as dt
 import os
-
+from os import listdir
+from os.path import isfile, join
+from datetime import datetime
 from werkzeug.exceptions import abort
+import subprocess
 
 from github_util import push_to_repo_branch, get_branch_info
 
@@ -100,18 +104,63 @@ def save_srt():
     return {"status": "ok"}
 
 
+@app.route('/mp3/<name>', methods=['GET', 'OPTIONS'])
+def serve_mp3(name):
+    if request.method == "OPTIONS":  # CORS preflight
+        return _build_cors_preflight_response()
+    folder = "/Users/satyendra.kumar/Documents/RandomlyGeneratedMusicalIdeas"
+
+    def generate():
+        with open(f"{folder}/{name}", "rb") as fwav:
+            data = fwav.read(1024)
+            while data:
+                yield data
+                data = fwav.read(1024)
+
+    return _corsify_actual_response(Response(generate(), mimetype="audio/mpeg"))
+
+
+def cleanup(folder):
+    onlyfiles = [os.path.join(path, fn) for fn in next(os.walk(path))[2]] 
+    for f in onlyfiles:
+        ct = time.ctime(os.path.getctime(f))
+        d = datetime.datetime.now() - ct 
+        if d > 2:
+            os.remove(f)
+
+
+
+
+@app.route('/musicxml', methods=['POST', 'OPTIONS'])
+def music_xml_to_mp3():
+    if request.method == "OPTIONS":  # CORS preflight
+        return _build_cors_preflight_response()
+    folder = "/Users/satyendra.kumar/Documents/RandomlyGeneratedMusicalIdeas/"
+    data = request.get_json(force=True)
+    dt_string = datetime.now().strftime("%d-%m-%Y-%H%M%S")
+    generated_name = f"{data['key']}_{dt_string}"
+    prefix = f"{folder}/{generated_name}"
+    musicxml_file = f'{prefix}.xml'
+
+    with open(musicxml_file, 'w') as file:
+        file.write(data['musicxml'])
+    output_mp3_file = f"{prefix}.mp3"
+    p = subprocess.Popen(["/Applications/MuseScore 4.app/Contents/MacOS/mscore", "-o", output_mp3_file, musicxml_file])
+    p.wait()
+
+    threading.Thread(target=cleanup, args=(folder,)).start()
+    return _corsify_actual_response(jsonify({"name": f"{generated_name}.mp3"}))
+
+
 @app.route('/article/<article_id>', methods=['POST'])
 def save_article(article_id):
-    auth = request.headers.get('X-Auth')
-    if not auth:
-        auth = request.args.get("x-auth")
-    if not auth or auth != os.getenv("USER_PASSWORD"):
-        abort(401)
-    article_json = request.get_json()
+    perform_auth()
+
+    article_json = request.get_json(force=True)
 
     if not article_json:
         data = request.get_data()
-        # print(data.decode("utf-8"))
+        print(data.decode("utf-8"))
         article_json = json.loads(data.decode("utf-8"))
 
     article_json['lastUpdated'] = str(dt.datetime.now())
@@ -133,7 +182,15 @@ def save_article(article_id):
 
     update_index_if_required(article_json, branch_info, repo_slug, branch, user, token)
 
-    return make_response(jsonify(article_json), 200)
+    return make_response(jsonify({"status": "ok"}), 200)
+
+
+def perform_auth():
+    auth = request.headers.get('X-Auth')
+    if not auth:
+        auth = request.args.get("x-auth")
+    if not auth or auth != os.getenv("USER_PASSWORD"):
+        abort(401)
 
 
 # A welcome message to test our server
@@ -142,6 +199,49 @@ def index():
     return "<h1>Welcome to our server !!</h1>"
 
 
+def _corsify_actual_response(response):
+    response.headers.add("Access-Control-Allow-Origin", "*")
+    return response
+
+
+def _build_cors_preflight_response():
+    response = make_response()
+    response.headers.add("Access-Control-Allow-Origin", "*")
+    response.headers.add('Access-Control-Allow-Headers', "*")
+    response.headers.add('Access-Control-Allow-Methods', "*")
+    print("Returning preflight response", response)
+    return response
+
+
+def send_email():
+    sender = 'apexcoder10@gmail.com'
+    receivers = ['kumarsatya1990@gmail.com']
+
+    message = """From: From ApexCoder <apexcoder10@gmail.com>
+    To: To Satyendra <kumarsatya1990@gmail.com>
+    Subject: SMTP e-mail test
+    
+    This is a test e-mail message.
+    """
+
+    context = ssl.SSLContext(ssl.PROTOCOL_TLSv1_2)
+    try:
+        smtpObj = smtplib.SMTP('smtp.gmail.com', port=587)
+        smtpObj.starttls(context=context)
+        smtpObj.login('apexcoder10@gmail.com', 'Alpha_1234')
+        smtpObj.sendmail(sender, receivers, message)
+        print("Successfully sent email")
+    except smtplib.SMTPException as e:
+        print("Error: unable to send email")
+
+def handle_bad_request(e):
+    print(e)
+    return 'bad request!', 400
+
+# or, without the decorator
+app.register_error_handler(400, handle_bad_request)
+
 if __name__ == '__main__':
+    send_email()
     # Threaded option to enable multiple instances for multiple user access support
     app.run(threaded=True, port=5000)

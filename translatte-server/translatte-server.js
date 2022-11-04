@@ -1,9 +1,12 @@
+const fsPromises = require('fs/promises');
+const fs = require('fs');
 const querystring = require('querystring');
 const languages = require('./languages');
 const proxy_check = require('proxy-check');
 const tunnel = require('tunnel');
 const token = require('./token');
 const got = require('got');
+const path = require('path');
 
 const translatte = async (text, opts) => {
     opts = opts || {};
@@ -402,9 +405,92 @@ const translatte = async (text, opts) => {
     }
 };
 
-translatte("på", {sl: "sv", tl: "en"}).then(res => {
-    console.log(res)
-})
+const express = require('express');
+const bodyParser = require('body-parser');
+const url = require('url');
+
+let app = express();
+app.use(bodyParser.urlencoded({ extended: false }));
+app.use(bodyParser.json());
+
+async function readFile(file, key) {
+    try {
+        const data = await fsPromises.readFile(file);
+        return JSON.parse(data)
+    } catch (e) {
+        if(e.code === 'ENOENT') {
+            let dir = path.dirname(file)
+            console.log("File does not exist. Creating!", dir)
+
+            if(!fs.existsSync(dir)) {
+                fs.mkdirSync(dir, {recursive: true})
+            }
+            await fsPromises.appendFile(file, JSON.stringify({}));
+            return {}
+        }
+    }
+}
+
+async function getTranslationFromServer(q) {
+    console.log("Getting from server: ", q)
+    return await translatte(q, {
+        from: "sv",
+        to: "en",
+        agents: [
+            'Mozilla/5.0 (Windows NT 10.0; ...',
+            'Mozilla/4.0 (Windows NT 10.0; ...',
+            'Mozilla/5.0 (Windows NT 10.0; ...'
+        ],
+        // proxies: [
+        //     'LOGIN:PASSWORD@192.0.2.100:12345',
+        //     'LOGIN:PASSWORD@192.0.2.200:54321'
+        // ]
+    });
+}
+
+async function getFromLocalOrServer(q, src) {
+    src = src.toString()
+    console.log("Src " + src)
+    src = src.replace("https://", "").replace("http://", "")
+    let path = "swedish/" + src + "/translation.json"
+
+    let fileJson = await readFile(path);
+    // console.log(fileJson, "fileJson")
+    if(!fileJson[q] || fileJson[q].trim().length === 0) {
+        let translation = await getTranslationFromServer(q)
+        fileJson[q] = translation.text
+        console.log("translation", translation)
+        await fsPromises.writeFile(path, JSON.stringify(fileJson))
+    }
+
+    return fileJson[q]
+}
+
+// getFromLocalOrServer("hej", "https://www.svtplay.se/video/8Wv74NG/vagen-hem-berattelsen-om-en-adoption").then(data => {
+//     console.log("data", data)
+// })
+
+// Function to handle the root path
+app.get('/translate', async function(req, res) {
+
+    // Access the provided 'page' and 'limt' query parameters
+    let q = req.query.q;
+    let src = req.query.src;
+    try {
+        let translated = await getFromLocalOrServer(q, src)
+
+        // Return the articles to the rendering engine
+        res.json({eng: translated})
+    } catch (e) {
+        res.json({eng: '......'})
+    }
+
+});
+
+let port = 3001;
+let server = app.listen(port, function() {
+    console.log(`Server is listening on port ${port}`)
+});
 
 module.exports = translatte;
 module.exports.languages = languages;
