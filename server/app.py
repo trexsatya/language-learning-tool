@@ -102,16 +102,13 @@ def save_srt():
 
 @app.route('/article/<article_id>', methods=['POST'])
 def save_article(article_id):
-    auth = request.headers.get('X-Auth')
-    if not auth:
-        auth = request.args.get("x-auth")
-    if not auth or auth != os.getenv("USER_PASSWORD"):
-        abort(401)
-    article_json = request.get_json()
+    perform_auth()
+
+    article_json = request.get_json(force=True)
 
     if not article_json:
         data = request.get_data()
-        # print(data.decode("utf-8"))
+        print(data.decode("utf-8"))
         article_json = json.loads(data.decode("utf-8"))
 
     article_json['lastUpdated'] = str(dt.datetime.now())
@@ -136,11 +133,26 @@ def save_article(article_id):
     return make_response(jsonify(article_json), 200)
 
 
+def perform_auth():
+    auth = request.headers.get('X-Auth')
+    if not auth:
+        auth = request.args.get("x-auth")
+    if not auth or auth != os.getenv("USER_PASSWORD"):
+        abort(401)
+
+
 # A welcome message to test our server
 @app.route('/')
 def index():
     return "<h1>Welcome to our server !!</h1>"
 
+
+def handle_bad_request(e):
+    print(e)
+    return 'bad request!', 400
+
+# or, without the decorator
+app.register_error_handler(400, handle_bad_request)
 
 if __name__ == '__main__':
     # Threaded option to enable multiple instances for multiple user access support
