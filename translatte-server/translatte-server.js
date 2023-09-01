@@ -1,12 +1,318 @@
-const fsPromises = require('fs/promises');
-const fs = require('fs');
-const querystring = require('querystring');
-const languages = require('./languages');
-const proxy_check = require('proxy-check');
-const tunnel = require('tunnel');
-const token = require('./token');
-const got = require('got');
-const path = require('path');
+// const fsPromises = require('fs/promises');
+// const fs = require('fs');
+// const querystring = require('querystring');
+// const languages = require('./languages.cjs');
+// const proxy_check = require('proxy-check');
+// const tunnel = require('tunnel');
+// const got = require('got');
+// const path = require('path');
+// const express = require('express');
+// const url = require('url');
+
+import * as url from 'url'
+import * as http from 'http'
+import * as fsPromises from 'fs/promises';
+import * as fs from 'fs';
+import * as querystring from 'querystring';
+// import * as languages from './languages.js';
+import * as proxy_check from 'proxy-check';
+import * as tunnel from 'tunnel';
+import fetch from 'node-fetch'
+// import Configstore from 'configstore';
+
+// import * as got  from 'got';
+import got from 'got'
+import * as path from 'path';
+
+console.log(got)
+
+// import * as express from 'express';
+// import * as bodyParser from 'body-parser';
+// import * as url from 'url';
+
+var langs = {
+    'auto': 'Automatic',
+    'af': 'Afrikaans',
+    'sq': 'Albanian',
+    'am': 'Amharic',
+    'ar': 'Arabic',
+    'hy': 'Armenian',
+    'az': 'Azerbaijani',
+    'eu': 'Basque',
+    'be': 'Belarusian',
+    'bn': 'Bengali',
+    'bs': 'Bosnian',
+    'bg': 'Bulgarian',
+    'ca': 'Catalan',
+    'ceb': 'Cebuano',
+    'ny': 'Chichewa',
+    'zh': 'Chinese (Simplified)',
+    'zh-cn': 'Chinese (Simplified)',
+    'zh-tw': 'Chinese (Traditional)',
+    'co': 'Corsican',
+    'hr': 'Croatian',
+    'cs': 'Czech',
+    'da': 'Danish',
+    'nl': 'Dutch',
+    'en': 'English',
+    'eo': 'Esperanto',
+    'et': 'Estonian',
+    'tl': 'Filipino',
+    'fi': 'Finnish',
+    'fr': 'French',
+    'fy': 'Frisian',
+    'gl': 'Galician',
+    'ka': 'Georgian',
+    'de': 'German',
+    'el': 'Greek',
+    'gu': 'Gujarati',
+    'ht': 'Haitian Creole',
+    'ha': 'Hausa',
+    'haw': 'Hawaiian',
+    'he': 'Hebrew',
+    'iw': 'Hebrew',
+    'hi': 'Hindi',
+    'hmn': 'Hmong',
+    'hu': 'Hungarian',
+    'is': 'Icelandic',
+    'ig': 'Igbo',
+    'id': 'Indonesian',
+    'ga': 'Irish',
+    'it': 'Italian',
+    'ja': 'Japanese',
+    'jw': 'Javanese',
+    'kn': 'Kannada',
+    'kk': 'Kazakh',
+    'km': 'Khmer',
+    'ko': 'Korean',
+    'ku': 'Kurdish (Kurmanji)',
+    'ky': 'Kyrgyz',
+    'lo': 'Lao',
+    'la': 'Latin',
+    'lv': 'Latvian',
+    'lt': 'Lithuanian',
+    'lb': 'Luxembourgish',
+    'mk': 'Macedonian',
+    'mg': 'Malagasy',
+    'ms': 'Malay',
+    'ml': 'Malayalam',
+    'mt': 'Maltese',
+    'mi': 'Maori',
+    'mr': 'Marathi',
+    'mn': 'Mongolian',
+    'my': 'Myanmar (Burmese)',
+    'ne': 'Nepali',
+    'no': 'Norwegian',
+    'ps': 'Pashto',
+    'fa': 'Persian',
+    'pl': 'Polish',
+    'pt': 'Portuguese',
+    'pa': 'Punjabi',
+    'ro': 'Romanian',
+    'ru': 'Russian',
+    'sm': 'Samoan',
+    'gd': 'Scots Gaelic',
+    'sr': 'Serbian',
+    'st': 'Sesotho',
+    'sn': 'Shona',
+    'sd': 'Sindhi',
+    'si': 'Sinhala',
+    'sk': 'Slovak',
+    'sl': 'Slovenian',
+    'so': 'Somali',
+    'es': 'Spanish',
+    'su': 'Sundanese',
+    'sw': 'Swahili',
+    'sv': 'Swedish',
+    'tg': 'Tajik',
+    'ta': 'Tamil',
+    'te': 'Telugu',
+    'th': 'Thai',
+    'tr': 'Turkish',
+    'uk': 'Ukrainian',
+    'ur': 'Urdu',
+    'uz': 'Uzbek',
+    'vi': 'Vietnamese',
+    'cy': 'Welsh',
+    'xh': 'Xhosa',
+    'yi': 'Yiddish',
+    'yo': 'Yoruba',
+    'zu': 'Zulu'
+};
+/**
+ * Returns the ISO 639-1 code of the desiredLang – if it is supported by Google Translate
+ * @param {string} desiredLang – the name or the code of the desired language
+ * @returns {string|boolean} The ISO 639-1 code of the language or false if the language is not supported
+ */
+function getCode(desiredLang) {
+    if (!desiredLang) {
+        return false;
+    }
+    desiredLang = desiredLang.toLowerCase();
+
+    if (langs[desiredLang]) {
+        return desiredLang;
+    }
+
+    var keys = Object.keys(langs).filter(function (key) {
+        if (typeof langs[key] !== 'string') {
+            return false;
+        }
+
+        return langs[key].toLowerCase() === desiredLang;
+    });
+
+    return keys[0] || false;
+}
+
+/**
+ * Returns true if the desiredLang is supported by Google Translate and false otherwise
+ * @param desiredLang – the ISO 639-1 code or the name of the desired language
+ * @returns {boolean}
+ */
+function isSupported(desiredLang) {
+    return Boolean(getCode(desiredLang));
+}
+
+/**
+ * Returns utf8 length
+ * @param str – string
+ * @returns {number}
+ */
+function utf8Length(str) {
+    var utf8 = [];
+    for (var i = 0; i < str.length; i++) {
+        var charcode = str.charCodeAt(i);
+        if (charcode < 0x80) utf8.push(charcode);
+        else if (charcode < 0x800) {
+            utf8.push(0xc0 | (charcode >> 6),
+                0x80 | (charcode & 0x3f));
+        } else if (charcode < 0xd800 || charcode >= 0xe000) {
+            utf8.push(0xe0 | (charcode >> 12),
+                0x80 | ((charcode >> 6) & 0x3f),
+                0x80 | (charcode & 0x3f));
+        }
+        else {
+            i++;
+            charcode = 0x10000 + (((charcode & 0x3ff) << 10)
+                | (str.charCodeAt(i) & 0x3ff));
+            utf8.push(0xf0 | (charcode >> 18),
+                0x80 | ((charcode >> 12) & 0x3f),
+                0x80 | ((charcode >> 6) & 0x3f),
+                0x80 | (charcode & 0x3f));
+        }
+    }
+    return utf8.length;
+}
+
+function sM(a) {
+    var b;
+    if (null !== yr)
+        b = yr;
+    else {
+        b = wr(String.fromCharCode(84));
+        var c = wr(String.fromCharCode(75));
+        b = [b(), b()];
+        b[1] = c();
+        b = (yr = window[b.join(c())] || "") || ""
+    }
+    var d = wr(String.fromCharCode(116))
+        , c = wr(String.fromCharCode(107))
+        , d = [d(), d()];
+    d[1] = c();
+    c = "&" + d.join("") + "=";
+    d = b.split(".");
+    b = Number(d[0]) || 0;
+    for (var e = [], f = 0, g = 0; g < a.length; g++) {
+        var l = a.charCodeAt(g);
+        128 > l ? e[f++] = l : (2048 > l ? e[f++] = l >> 6 | 192 : (55296 === (l & 64512) && g + 1 < a.length && 56320 === (a.charCodeAt(g + 1) & 64512) ? (l = 65536 + ((l & 1023) << 10) + (a.charCodeAt(++g) & 1023),
+            e[f++] = l >> 18 | 240,
+            e[f++] = l >> 12 & 63 | 128) : e[f++] = l >> 12 | 224,
+            e[f++] = l >> 6 & 63 | 128),
+            e[f++] = l & 63 | 128)
+    }
+    a = b;
+    for (f = 0; f < e.length; f++)
+        a += e[f],
+            a = xr(a, "+-a^+6");
+    a = xr(a, "+-3^+b+-f");
+    a ^= Number(d[1]) || 0;
+    0 > a && (a = (a & 2147483647) + 2147483648);
+    a %= 1E6;
+    return c + (a.toString() + "." + (a ^ b))
+}
+
+var yr = null;
+var wr = function (a) {
+    return function () {
+        return a
+    }
+}
+    , xr = function (a, b) {
+    for (var c = 0; c < b.length - 2; c += 3) {
+        var d = b.charAt(c + 2)
+            , d = "a" <= d ? d.charCodeAt(0) - 87 : Number(d)
+            , d = "+" === b.charAt(c + 1) ? a >>> d : a << d;
+        a = "+" === b.charAt(c) ? a + d & 4294967295 : a ^ d
+    }
+    return a
+};
+
+// END
+/* eslint-enable */
+
+// console.log(Configstore)
+
+// var config = new Configstore('google-translate-api');
+
+var window = {
+    TKK: '422854.923862967'
+};
+
+function updateTKK(opts) {
+    opts = opts || {tld: 'com', proxy: {}, headers: {}};
+    return new Promise(function (resolve, reject) {
+        var now = Math.floor(Date.now() / 3600000);
+
+        if (Number(window.TKK.split('.')[0]) === now) {
+            resolve();
+        } else {
+            got('https://translate.google.' + opts.tld, {...opts.proxy, headers: opts.headers, timeout: 2000, retry: 0}).then(function (res) {
+                var code = res.body.match(/TKK='.*?';/g);
+
+                if (code) {
+                    eval(code[0]);
+                    /* eslint-disable no-undef */
+                    if (typeof TKK !== 'undefined') {
+                        window.TKK = TKK;
+                        // config.set('TKK', TKK);
+                    }
+                    /* eslint-enable no-undef */
+                }
+
+                /**
+                 * Note: If the regex or the eval fail, there is no need to worry. The server will accept
+                 * relatively old seeds.
+                 */
+
+                resolve();
+            }).catch(function () {
+                reject();
+            });
+        }
+    });
+}
+
+function get(text, opts) {
+    return updateTKK(opts).then(function () {
+        var tk = sM(text);
+        tk = tk.replace('&tk=', '');
+        return {name: 'tk', value: tk};
+    }).catch(function (e) {
+        console.log(`Error  ${e}`)
+        return null;
+    });
+}
 
 const translatte = async (text, opts) => {
     opts = opts || {};
@@ -39,19 +345,19 @@ const translatte = async (text, opts) => {
         'Text translation request failed'
     ];
 
-    if (opts.from && !languages.isSupported(opts.from)) {
+    if (opts.from && !isSupported(opts.from)) {
         return Promise.reject({message: errors[0].replace('[lang]', opts.from)});
     }
 
-    if (opts.to && !languages.isSupported(opts.to)) {
+    if (opts.to && !isSupported(opts.to)) {
         return Promise.reject({message: errors[0].replace('[lang]', opts.to)});
     }
 
-    let bytes = languages.utf8Length(text);
+    let bytes = utf8Length(text);
     opts.client = opts.client || 't';
     opts.tld = opts.tld || 'com';
-    opts.from = languages.getCode(opts.from || 'auto');
-    opts.to = languages.getCode(opts.to || 'en');
+    opts.from = getCode(opts.from || 'auto');
+    opts.to = getCode(opts.to || 'en');
     opts.services = opts.services || {google_free: true};
     let services = Object.keys(opts.services);
 
@@ -327,7 +633,7 @@ const translatte = async (text, opts) => {
 
     const translate_string = () => {
         return new Promise(async (resolve, reject) => {
-            let t = await token.get(text, opts);
+            let t = await get(text, opts);
 
             if (!t) return reject({google_free: errors[3]});
 
@@ -405,13 +711,9 @@ const translatte = async (text, opts) => {
     }
 };
 
-const express = require('express');
-const bodyParser = require('body-parser');
-const url = require('url');
 
-let app = express();
-app.use(bodyParser.urlencoded({ extended: false }));
-app.use(bodyParser.json());
+// let app = express();
+// app.use(express.json());
 
 async function readFile(file, key) {
     try {
@@ -448,49 +750,74 @@ async function getTranslationFromServer(q) {
     });
 }
 
-async function getFromLocalOrServer(q, src) {
+async function getFromLocalOrServer(q, src, ts, te, all) {
     src = src.toString()
     console.log("Src " + src)
     src = src.replace("https://", "").replace("http://", "")
-    let path = "swedish/" + src + "/translation.json"
+    let localPath = "swedish/" + src + "/translation.json"
 
-    let fileJson = await readFile(path);
+    let fileJson = await readFile(localPath);
+    if(!fileJson || !fileJson.length) fileJson = []
+
+    if(all) return fileJson
+
+    let matching = fileJson.find(it => it['sv'] && it['sv'].trim() === q.trim())
+
     // console.log(fileJson, "fileJson")
-    if(!fileJson[q] || fileJson[q].trim().length === 0) {
+    if(!matching) {
         let translation = await getTranslationFromServer(q)
-        fileJson[q] = translation.text
+        matching = {sv: q.trim(), en: translation.text.trim(), ts: ts, te: te, id: fileJson.length + 1}
+        fileJson.push(matching)
+
         console.log("translation", translation)
-        await fsPromises.writeFile(path, JSON.stringify(fileJson))
+        await fsPromises.writeFile(localPath, JSON.stringify(fileJson))
     }
 
-    return fileJson[q]
+    return matching['en']
 }
 
 // getFromLocalOrServer("hej", "https://www.svtplay.se/video/8Wv74NG/vagen-hem-berattelsen-om-en-adoption").then(data => {
 //     console.log("data", data)
 // })
 
-// Function to handle the root path
-app.get('/translate', async function(req, res) {
+const server = http.createServer(async (req, res) => {
+    if (req.url.indexOf("/translate") >= 0 && req.method === "GET") {
+        let reqUrl = new url.URL(`http://localhost${req.url}`)
+        // console.log(reqUrl)
+        let searchParams = reqUrl.searchParams
+        let q = searchParams.get('q');
+        let src = searchParams.get('src');
+        let ts = searchParams.get('ts');
+        let te = searchParams.get('te');
+        let all = searchParams.get('all');
 
-    // Access the provided 'page' and 'limt' query parameters
-    let q = req.query.q;
-    let src = req.query.src;
-    try {
-        let translated = await getFromLocalOrServer(q, src)
+        try {
+            let translated = await getFromLocalOrServer(q, src, ts, te, all)
 
-        // Return the articles to the rendering engine
-        res.json({eng: translated})
-    } catch (e) {
-        res.json({eng: '......'})
+            res.write(JSON.stringify({eng: translated }));
+        } catch (e) {
+            console.log(e)
+            res.write(`{ "eng": "..." }\r\n`);
+        }
+
+        res.writeHead(200, { "Content-Type": "application/json" });
+        //set the response
+
+        //end the response
+        res.end();
+    } else {
+        res.writeHead(404, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ message: "Route not found" }));
     }
-
 });
 
+// Function to handle the root path
+
+
 let port = 3001;
-let server = app.listen(port, function() {
+server.listen(port, 'localhost',5, function() {
     console.log(`Server is listening on port ${port}`)
 });
 
-module.exports = translatte;
-module.exports.languages = languages;
+// module.exports = translatte;
+// module.exports.languages = languages;

@@ -104,9 +104,14 @@ async function test() {
                         lastText = text
                     // console.log($node, text)
                     // Pause and Translate
-                    if($('#translateToggleButton').is(":checked"))
+                    if($('#translateToggleButton').is(":checked")) {
                         $("button[title=Pausa]").click()
-                    fetch(`${TRANSLATION_SERVER_API}?q=${text}&src=${location.toString()}`, {mode: 'no-cors'})
+                    }
+
+                    let time = $('div[data-rt="video-player-time-indicator"]').text()
+                    time = time.split("/")[0].trim();
+
+                    fetch(`${TRANSLATION_SERVER_API}?q=${text}&src=${location.toString()}&ts=${time}`, {mode: 'no-cors'})
                         .then(it => it.text())
                         .then(resp => {
                             let txt = resp
