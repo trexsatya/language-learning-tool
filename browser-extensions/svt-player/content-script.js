@@ -100,6 +100,11 @@ async function test() {
                     // if( $($node).attr( "class" ).indexOf("_video-player__text-tracks_") >= 0 ) {
                     let text = $($node).html();
                     text = $(text.replace(/<br\s*\/?>/gi,' ')).text()
+                    if(text.startsWith(lastText)) {
+                        lastText += text
+                        return
+                    }
+
                     if(lastText !== text) {
                         lastText = text
                     // console.log($node, text)

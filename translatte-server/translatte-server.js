@@ -750,14 +750,28 @@ async function getTranslationFromServer(q) {
     });
 }
 
+function srcToLocalPath(src) {
+    src = src.replace("https://", "").replace("http://", "")
+    src = src.split("?")[0]
+    src = src.replace("www.svtplay.se/video/", "svt/")
+    if(src.indexOf("svt/") >= 0) {
+        let splits = src.split("/")
+        return `svt/${splits.slice(2).join("/")}`
+    }
+    return src
+}
+
 async function getFromLocalOrServer(q, src, ts, te, all) {
     src = src.toString()
     console.log("Src " + src)
-    src = src.replace("https://", "").replace("http://", "")
-    let localPath = "swedish/" + src + "/translation.json"
+
+    let localPath = "swedish/" + srcToLocalPath(src) + "/translation.json"
 
     let fileJson = await readFile(localPath);
-    if(!fileJson || !fileJson.length) fileJson = []
+    if(!fileJson || !fileJson.length) {
+        console.log(`File ${localPath} doesn't exist or file is empty!`)
+        fileJson = []
+    }
 
     if(all) return fileJson
 
@@ -766,11 +780,16 @@ async function getFromLocalOrServer(q, src, ts, te, all) {
     // console.log(fileJson, "fileJson")
     if(!matching) {
         let translation = await getTranslationFromServer(q)
+        if(!translation.text) {
+            return ''
+        }
         matching = {sv: q.trim(), en: translation.text.trim(), ts: ts, te: te, id: fileJson.length + 1}
         fileJson.push(matching)
 
-        console.log("translation", translation)
+        console.log(`Translation fetched from server!`)
         await fsPromises.writeFile(localPath, JSON.stringify(fileJson))
+    } else {
+        console.log(`Translation found in file!`)
     }
 
     return matching['en']
