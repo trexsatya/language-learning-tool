@@ -53,7 +53,7 @@ def send_email(subject, body):
         smtpObj.login(os.getenv('EMAIL_ID'), os.getenv("EMAIL_PWD"))
         smtpObj.sendmail(sender, receivers, message.as_string())
 
-        print("Successfully sent email")
+#         print("Successfully sent email")
     except smtplib.SMTPException as e:
         print(e)
         pass
@@ -193,12 +193,12 @@ def job(_article_html, _history, _time, _day):
     def are_related(x, y):
         x = x.lower()
         y = y.lower()
-        print("Are related?", x, y)
+#         print("Are related?", x, y)
         return x == y or x in y or y in x
 
     def example_has_similarity_to_word_of_the_day(_id):
         if not word_of_the_day:
-            print("No word_of_the_day", _id)
+#             print("No word_of_the_day", _id)
             return True
 
         words_for_this_ex = all_words[_id]
@@ -209,7 +209,7 @@ def job(_article_html, _history, _time, _day):
             is_related = are_related(*pair)
 
             if is_related:
-                print(f"Found match:\n  Words in ex: {all_words_for_this_ex}\n  WOTD: {word_of_the_day}", )
+#                 print(f"Found match:\n  Words in ex: {all_words_for_this_ex}\n  WOTD: {word_of_the_day}", )
                 return True
         return False
 
@@ -220,7 +220,7 @@ def job(_article_html, _history, _time, _day):
 
     set_word_of_the_day_if_null(random.choice(all_words[word_html_id]))
 
-    print("Chosen Word=", word_html)
+    print(f"Chosen Word(s)= ID: {word_html_id}, {all_words[word_html_id]}" )
 
     link = ""
 

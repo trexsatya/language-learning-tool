@@ -2,7 +2,6 @@ from util_scheduler import job, set_word_of_the_day, record_it
 from unittest.mock import patch
 import unittest
 
-
 with open("sample.html", "r") as f:
     article_html = f.read()
 
@@ -24,4 +23,9 @@ class TestScheduler(unittest.TestCase):
 
 
 if __name__ == '__main__':
+    import easyocr
+
+    reader = easyocr.Reader(['en'])
+    result = reader.readtext('test.jpg', detail=0)
+    print(result)
     unittest.main()

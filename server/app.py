@@ -106,6 +106,12 @@ def write_audio_base64(audio, lang, file):
     with open(file_path, 'w') as file:
         file.write(json.dumps(audio))
 
+@app.route('/proxy', methods=['GET'])
+def proxy():
+    url = request.args.get("url", None)
+    resp = requests.get(url).text
+    return _corsify_actual_response(Response(resp, mimetype="text/plain"))
+
 
 @app.route('/srt', methods=['POST'])
 def save_srt():
