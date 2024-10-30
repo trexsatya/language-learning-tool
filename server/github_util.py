@@ -97,7 +97,7 @@ def push_to_repo_branch(gitHubFileName, content, branch_info, repo_slug, branch,
     updateURL = f"https://api.github.com/repos/{repo_slug}/contents/" + gitHubFileName
     try:
         rPut = requests.put(updateURL, auth=(user, token), data=json.dumps(inputdata))
-        print(rPut.text)
+        # print(rPut.text)
         if not rPut.ok:
             print("Error when pushing to %s" % updateURL)
             print("Reason: %s [%d]" % (rPut.text, rPut.status_code))
