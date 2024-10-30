@@ -22,33 +22,31 @@ from github_util import push_to_repo_branch, get_branch_info
 import subprocess
 import unicodedata
 import urllib.parse
+import threading
+import sounddevice as sd
+from scipy.io.wavfile import write
+import base64
+import io, base64
+from PIL import Image
+from pydub import AudioSegment
+
+
 
 app = Flask(__name__)
 base_url = "https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db"
+swedish_media_base_dir = "/Users/satyendra.kumar/Documents/Swedish_Media/All_Subs/SeparatedAudios/"
+swedish_media_path = pathlib.Path(swedish_media_base_dir)
 
 
-@app.route('/getmsg/', methods=['GET'])
+@app.route('/log', methods=['POST'])
 def respond():
     # Retrieve the name from url parameter
     name = request.args.get("name", None)
+    data = request.get_data()
+    data = data.decode("utf-8")
 
-    # For debugging
-    print(f"got name {name}")
-
-    response = {}
-
-    # Check if user sent a name at all
-    if not name:
-        response["ERROR"] = "no name found, please send a name."
-    # Check if the user entered a number not a name
-    elif str(name).isdigit():
-        response["ERROR"] = "name can't be numeric."
-    # Now the user entered a valid name
-    else:
-        response["MESSAGE"] = f"Welcome {name} to our awesome platform!!"
-
-    # Return the response in json format
-    return jsonify(response)
+    print(data)
+    return _corsify_actual_response(Response("", mimetype="text/plain"))
 
 
 def update_index_if_required(updated, branch_info, repo_slug, branch, user, token):
@@ -60,14 +58,21 @@ def update_index_if_required(updated, branch_info, repo_slug, branch, user, toke
     if current_subject_ != updated_subject_:
         print("Change in index: ", current_subject_, " -> ", updated_subject_)
 
-        current_subject_json = requests.get(f"{base_url}/articles/{current_subject_}").json()
-        current_subject_json = json.dumps(list(filter(lambda x: x['id'] != article_id_, current_subject_json)))
+        current_subjects = requests.get(f"{base_url}/articles/{current_subject_}")
+        current_subjects_json = []
+        if current_subjects.status_code == 200:
+            current_subjects_json = current_subjects.json()
+
+        current_subject_json = json.dumps(list(filter(lambda x: x['id'] != article_id_, current_subjects_json)))
         print(f"Updated {current_subject_}: {current_subject_json}")
         push_to_repo_branch(f'db/articles/{current_subject_}', current_subject_json, branch_info, repo_slug, branch,
                             user,
                             token)
 
-        updated_subject_json = requests.get(f"{base_url}/articles/{updated_subject_}").json()
+        updated_subject = requests.get(f"{base_url}/articles/{updated_subject_}")
+        updated_subject_json = []
+        if updated_subject.status_code == 200:
+            updated_subject_json = updated_subject.json()
         updated_subject_json: List = list(filter(lambda x: x['id'] != article_id_, updated_subject_json))
         updated['content'] = ''
         updated_subject_json.append(updated)
@@ -106,6 +111,7 @@ def write_audio_base64(audio, lang, file):
     with open(file_path, 'w') as file:
         file.write(json.dumps(audio))
 
+
 @app.route('/proxy', methods=['GET'])
 def proxy():
     url = request.args.get("url", None)
@@ -123,43 +129,29 @@ def save_srt():
     return {"status": "ok"}
 
 
-def __find_matching_mp3(srt_file):
-    def normalize(s):
-        s = unicodedata.normalize('NFC', s).replace("？", " ")\
-                .replace("：", " ").replace("⧸", " ").replace("｜", " ").replace("_", " ")
-        return ' '.join(s.split())
-
-    srt_file = srt_file.replace("[Swedish] ", "")
-    srt_file = srt_file.replace(" [DownSub.com]", "")
-    p = pathlib.Path(srt_file)
-
-    normalized_name_srt = normalize( p.name)
-    print("Looking for mp3 for", srt_file)
-
-    for it in p.parent.glob("*.mp3"):
-        name = str(it.stem)
-        normalized_name_mp3_file = normalize(name)
-
-        if "Edith" in name:
-            def chars(s):
-                return s + str(list(map(lambda x: f"{x}_{ord(x)}", list(unicodedata.normalize('NFC', s)))))
-            print(f"{chars(normalized_name_mp3_file)}\n{chars(str(normalized_name_srt))}")
-
-        if normalized_name_mp3_file in normalized_name_srt:
+def __find_matching_media(url):
+    for it in swedish_media_path.rglob("*.wav"):
+        # print(str(it))
+        if url in str(it) and not('accompaniment' in str(it)):
             return it
+    return None
+
+print(__find_matching_media('K1X1WY1'), 'Match')
 
 # __find_matching_mp3('/Users/satyendra.kumar/Documents/Swedish_Media/Swedish_YT_2/[Swedish] PUTIN-PRISER -
 # Klimatrörelse + Krig ekonomisk armageddon_ [DownSub.com].srt')
 
 
-def slice_mp3(in_file, out_file, start, end):
+def slice_mp3(in_file, out_file, start, end, ffmpeg_options=''):
     def extract(n):
         s = str(n)
         if ":" in s:
             return s.replace(",", ".")
-        millis = s[-3:]
-        rest = s[:-3]
-        n = int(rest)
+        millis = '000'
+        rest = s
+        n = 0
+        if rest:
+            n = int(rest)
         hrs = floor(n / 3600)
         mins = floor((n % 3600) / 60)
         secs = floor((n % 3600) % 60)
@@ -170,8 +162,10 @@ def slice_mp3(in_file, out_file, start, end):
         print(f"Creating new dir {folder}")
         folder.mkdir(parents=True)
 
-    cmd = f"ffmpeg -ss {extract(start)} -t {extract(end - start)} -i \"{in_file}\"  -acodec copy {out_file}"
-    print(cmd)
+    out_file = out_file.replace(".mp3", ".wav")
+    print("start", start, "end", end, "in_file", in_file, "out_file", out_file)
+    cmd = f"ffmpeg {ffmpeg_options} -ss {extract(start)} -t {extract(end - start)} -i \"{in_file}\"  -acodec copy {out_file}"
+    print("Command", cmd)
     os.system(cmd)
 
 
@@ -237,6 +231,7 @@ def record_mp3_mapping(mp3_file, text, file):
 
     return text_json
 
+
 # TESTS
 # print(folder_for_word("kvar"))
 # mp3_for_kvar = mp3_out_file_for_word("kvar")
@@ -249,20 +244,23 @@ def record_mp3_mapping(mp3_file, text, file):
 def __find_word(text):
     if not text or len(text) < 3:
         return []
-    base_dir = "/Users/satyendra.kumar/Documents/Swedish_Media"
-    p = pathlib.Path(base_dir)
+
+    p = pathlib.Path("/Users/satyendra.kumar/Documents/PersonalProjects/trexsatya.github.io/db/language/swedish/")
+
     relevant = []
-    for it in p.rglob("*.srt"):
-        subs = pysrt.open(it)
-        sub_text = '\n'.join(map(lambda x: x.text, subs))
+    num = 0
 
-        if re.search(text.lower(), sub_text.lower()):
-            relevant.append(subs)
-
+    for it in p.rglob("vocabulary.txt"):
+        with open(it, "r") as _f:
+            txt = _f.read()
+            for ln in txt.split("\n"):
+                if text.lower() in ln.lower():
+                    num += 1
+                    relevant.append({"text": ln, "file": pathlib.Path(it).absolute().as_uri().replace("file://", "")})
     return relevant
 
 
-# print(len(list(map(lambda x: x[0], __find_word("bn")))))
+print(len(list(map(lambda x: x, __find_word("firmor")))))
 
 
 @app.route('/find', methods=['GET'])
@@ -273,6 +271,46 @@ def find_word():
     return _corsify_actual_response(Response(_json, mimetype="application/json"))
 
 
+@app.route('/vocabulary', methods=['GET'])
+def vocabulary():
+    file = "/Users/satyendra.kumar/Documents/PersonalProjects/trexsatya.github.io/db/language/swedish/vocabulary.txt"
+    with open(file, "r") as _file:
+        res = list(map(lambda x: {"text": x, "file": file}, _file.readlines()))
+    _json = jsonpickle.encode(res, unpicklable=False)
+    return _corsify_actual_response(Response(_json, mimetype="application/json"))
+
+
+@app.route('/mp3_slice', methods=['GET'])
+def play_slice():
+    print(request.args)
+    url = request.args.get("url")
+    start = request.args.get("start")
+    end = request.args.get("end")
+
+    media_path = __find_matching_media(url)
+    if not media_path:
+        return f"No matching media found {media_path}", 400
+
+    mp3_for_slice = "slice_out.wav"
+    slice_mp3(media_path, mp3_for_slice, int(start), int(end), ' -y ')
+
+    return audio_file_response(mp3_for_slice)
+
+@app.route('/save-vocab', methods=['POST', 'OPTIONS'])
+def save_vocab():
+    if request.method == "OPTIONS":  # CORS preflight
+        return _build_cors_preflight_response()
+    perform_auth()
+    data = request.get_data(as_text=True)
+    [repo_slug, branch, user, token] = ['trexsatya/trexsatya.github.io', 'gh-pages', 'trexsatya',
+                                        os.getenv("GITHUB_TOKEN")]
+    branch_info = get_branch_info(repo_slug, branch, user, token)
+    # print(current)
+    push_to_repo_branch(f'db/language/swedish/vocabulary.txt', data, branch_info, repo_slug, branch,
+                    user,
+                    token)
+    return _corsify_actual_response(jsonify({"status": "ok"}))
+
 @app.route('/extract_word_from_subtitle', methods=['POST'])
 def extract_word():
     data = request.get_json(force=True)
@@ -282,7 +320,7 @@ def extract_word():
     word = data['word']
     text = data['text']
 
-    mp3_path = __find_matching_mp3(srt_path)
+    mp3_path = __find_matching_media(srt_path)
     if not mp3_path:
         return f"No matching mp3 found {mp3_path}", 400
 
@@ -293,14 +331,30 @@ def extract_word():
     return _corsify_actual_response(Response(jsonpickle.encode(_json, unpicklable=False), mimetype="application/json"))
 
 
-@app.route('/mp3/<name>', methods=['GET', 'OPTIONS'])
-def serve_mp3(name):
+@app.route('/mp3', methods=['GET', 'OPTIONS'])
+def serve_mp3():
     if request.method == "OPTIONS":  # CORS preflight
         return _build_cors_preflight_response()
-    folder = "/Users/satyendra.kumar/Documents/RandomlyGeneratedMusicalIdeas"
 
+    path = request.args.get("path")
+
+    return audio_file_response(path)
+
+@app.route('/all_media_files', methods=['GET', 'OPTIONS'])
+def all_media_files():
+    if request.method == "OPTIONS":  # CORS preflight
+        return _build_cors_preflight_response()
+
+    files = []
+    for it in swedish_media_path.rglob("*.wav"):
+        files.append(str(it))
+
+    return _corsify_actual_response(jsonify(files))
+
+
+def audio_file_response(path):
     def generate():
-        with open(f"{folder}/{name}", "rb") as fwav:
+        with open(path, "rb") as fwav:
             data = fwav.read(1024)
             while data:
                 yield data
@@ -318,29 +372,164 @@ def cleanup(folder):
             os.remove(f)
 
 
+NUM = 1
+
+
+@app.route('/save_img', methods=['POST', 'OPTIONS'])
+def base64_to_img():
+    if request.method == "OPTIONS":  # CORS preflight
+        return _build_cors_preflight_response()
+    folder = "/Users/satyendra.kumar/Documents/Swedish_Media/Liknelse"
+    data = request.get_json(force=True)
+    global NUM
+
+    img_data = data['img'].replace("data:image/jpeg;base64,", "")
+    with open(f"{folder}/phrase_{NUM}.jpeg", "wb") as f:
+        f.write(base64.decodebytes(bytes(img_data, "utf-8")))
+
+    # img = Image.open(io.BytesIO(base64.decodebytes(bytes(img_data, "utf-8"))))
+    # img.save(f"{folder}/phrase{NUM}.jpeg", quality=100, subsampling=0)
+
+    NUM += 1
+    return _corsify_actual_response(jsonify({"name": f""}))
+
+
+def combine_audios(file1, file2, final_out):
+    sound1 = AudioSegment.from_file(file1, format="mp3")
+    sound2 = AudioSegment.from_file(file2, format="mp3")
+    combined = sound1 + sound2
+
+    return combined.export(final_out, format="mp3")
+
+
 @app.route('/musicxml', methods=['POST', 'OPTIONS'])
 def music_xml_to_mp3():
     if request.method == "OPTIONS":  # CORS preflight
         return _build_cors_preflight_response()
-    folder = "/Users/satyendra.kumar/Documents/RandomlyGeneratedMusicalIdeas/"
+    folder = "/Users/satyendra.kumar/Documents/MusicWorkshop"
     data = request.get_json(force=True)
     dt_string = datetime.now().strftime("%d-%m-%Y-%H%M%S")
     generated_name = f"{data['key']}_{dt_string}"
+    metadata = data.get('metadata', None)
     prefix = f"{folder}/{generated_name}"
     musicxml_file = f'{prefix}.xml'
 
     with open(musicxml_file, 'w') as file:
         file.write(data['musicxml'])
-    output_mp3_file = f"{prefix}.mp3"
-    p = subprocess.Popen(["/Applications/MuseScore 4.app/Contents/MacOS/mscore", "-o", output_mp3_file, musicxml_file])
+    output_mp3_file_for_music_xml = f"{prefix}.mp3"
+    p = subprocess.Popen(["/Applications/MuseScore 3.app/Contents/MacOS/mscore", "-o",
+                          output_mp3_file_for_music_xml, musicxml_file])
     p.wait()
 
-    threading.Thread(target=cleanup, args=(folder,)).start()
-    return _corsify_actual_response(jsonify({"name": f"{generated_name}.mp3"}))
+    if not metadata:
+        return _corsify_actual_response(jsonify({"file": output_mp3_file_for_music_xml}))
+
+    final_out = f"{prefix}_final.mp3"
+
+    metadata_audio = get_audio_from_tts_server("en", metadata, folder)
+    combine_audios(output_mp3_file_for_music_xml, metadata_audio, final_out)
+
+    # threading.Thread(target=cleanup, args=(folder,)).start()
+    # return audio_file_response(final_out)
+    return _corsify_actual_response(jsonify({"file": final_out}))
 
 
-@app.route('/article/<article_id>', methods=['POST'])
+@app.route('/tts-proxy', methods=['GET'])
+def proxy_google_tts():
+    q = request.args.get("q")
+    lang = request.args.get("lang", "sv")
+    path = get_audio_from_tts_server(lang, q)
+    return audio_file_response(path)
+
+
+def get_audio_from_tts_server(lang, q, folder=None):
+    if not folder:
+        folder = "."
+    url = f"https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl={lang}&q={q}"
+    print(url)
+    doc = requests.get(url)
+    path = f'{folder}/tts.mp3'
+    with open(path, 'wb') as f:
+        f.write(doc.content)
+    return path
+
+
+@app.route('/srt-favorites', methods=['POST', 'OPTIONS'])
+def update_srts_favorite():
+    if request.method == "OPTIONS":  # CORS preflight
+        return _build_cors_preflight_response()
+
+    data_json = request.get_json(force=True)
+
+    [repo_slug, branch, user, token] = ['trexsatya/trexsatya.github.io', 'gh-pages', 'trexsatya',
+                                        os.getenv("GITHUB_TOKEN")]
+
+    if not 'link' in data_json:
+        return _corsify_actual_response(jsonify({"result": "nok"}))
+
+    current = requests.get(f"{base_url}/srts/srt_favorites.json").json()
+    l = data_json['link']
+    s = data_json['source']
+
+    to_update = next((x for x in current if x['link'] == l and x['source'] == s), None)
+    if not to_update:
+        to_update = {"link": l, "source": s}
+        current.append(to_update)
+    to_update['lines'] = data_json['lines']
+
+    branch_info = get_branch_info(repo_slug, branch, user, token)
+    # print(current)
+    push_to_repo_branch(f'db/srts/srt_favorites.json', json.dumps(current), branch_info, repo_slug, branch,
+                        user,
+                        token)
+    return _corsify_actual_response(jsonify({"result": "ok"}))
+
+
+@app.route('/srt-revision', methods=['POST', 'OPTIONS'])
+def update_srts_revision():
+    if request.method == "OPTIONS":  # CORS preflight
+        return _build_cors_preflight_response()
+
+    data_json = request.get_json(force=True)
+
+    if 'link' not in data_json:
+        return _corsify_actual_response(jsonify({"result": "nok"}))
+
+    [repo_slug, branch, user, token] = ['trexsatya/trexsatya.github.io', 'gh-pages', 'trexsatya',
+                                        os.getenv("GITHUB_TOKEN")]
+
+    current = requests.get(f"{base_url}/srt_revision.json").json()
+    l = data_json['link']
+    s = data_json['source']
+
+    to_update = next((x for x in current if x['link'] == l and x['source'] == s), None)
+    if not to_update:
+        to_update = {"link": l, "source": s}
+        current.append(to_update)
+    to_update['dates'] = data_json['dates']
+
+    if not to_update['dates']:
+        to_update['dates'] = [dt.date.today() + dt.timedelta(days=1),
+                              dt.date.today() + dt.timedelta(days=3),
+                              dt.date.today() + dt.timedelta(days=7),
+                              dt.date.today() + dt.timedelta(days=15),
+                              dt.date.today() + dt.timedelta(days=30),
+                              dt.date.today() + dt.timedelta(days=120)]
+        to_update['dates'] = list(map(lambda t: t.strftime('%Y-%m-%d'), to_update['dates']))
+
+    branch_info = get_branch_info(repo_slug, branch, user, token)
+    # print(current)
+    push_to_repo_branch(f'db/srt_revision.json', json.dumps(current), branch_info, repo_slug, branch,
+                        user,
+                        token)
+    return _corsify_actual_response(jsonify({"result": "ok"}))
+
+
+@app.route('/article/<article_id>', methods=['POST', 'OPTIONS'])
 def save_article(article_id):
+    if request.method == "OPTIONS":  # CORS preflight
+        return _build_cors_preflight_response()
+
     perform_auth()
 
     article_json = request.get_json(force=True)
@@ -386,6 +575,25 @@ def perform_auth():
 @app.route('/')
 def index():
     return "<h1>Welcome to our server !!</h1>"
+
+
+fs = 44100  # Sample rate
+
+
+def record_audio(seconds):
+    myrecording = sd.rec(int(seconds * fs), samplerate=fs, channels=1)
+    sd.wait()
+    n = datetime.now()
+    write(f"{swedish_media_base_dir}/recording{n.day}_{n.hour}_{n.minute}.wav", fs, myrecording)
+
+
+@app.route('/record', methods=['POST'])
+def record_audio_thread():
+    seconds = request.args.get("seconds", None)
+    if seconds:
+        print("Recording audio for", seconds, "seconds")
+        threading.Thread(target=record_audio, args=[int(seconds)]).start()
+    return _corsify_actual_response(jsonify({"status": "ok"}))
 
 
 def _corsify_actual_response(response):
